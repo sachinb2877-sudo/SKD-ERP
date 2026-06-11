@@ -1,0 +1,27 @@
+{
+  "name": "skd-erp",
+  "version": "1.0.0",
+  "description": "SKD ERP — Professional Financial Management System with double-entry accounting, role-based access, and Maker-Checker workflow",
+  "author": "SKD Team",
+  "license": "MIT",
+  "keywords": ["erp", "finance", "accounting", "dashboard", "react", "vite"],
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.5.28",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "vite": "^8.0.9"
+  }
+}

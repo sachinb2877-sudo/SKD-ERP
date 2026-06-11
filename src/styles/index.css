@@ -1,0 +1,9 @@
+/* ═══════════════════════════════════════════════════════════
+   index.css — Main stylesheet entry point
+   Imports all modular CSS files in dependency order.
+   ═══════════════════════════════════════════════════════════ */
+
+@import './base.css';         /* Design tokens, reset, utilities */
+@import './layout.css';       /* App shell, sidebar, topbar */
+@import './components.css';   /* Cards, buttons, tables, modals */
+@import './pages.css';        /* Page-specific styles */
