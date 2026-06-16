@@ -11,6 +11,7 @@ node_modules/
 dist/
 build/
 out/
+.vercel/
 
 # Environment variables (NEVER commit secrets)
 .env

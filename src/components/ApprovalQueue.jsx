@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useERP } from '../hooks/useERP.js';
+import { useToast } from '../context/ToastContext.jsx';
 
 /**
  * ApprovalQueue — Checker interface for the Maker-Checker workflow.
  * Shows all PENDING transactions. Checker can Approve or Reject (with notes).
+ * Self-approval is blocked: users cannot approve their own transactions.
  */
 const ApprovalQueue = () => {
-  const { pendingTransactions, accounts, parties, approveTransaction, rejectTransaction, currentUser } = useERP();
+  const { pendingTransactions, accounts, parties, approveTransaction, rejectTransaction, currentUser, isLoading } = useERP();
+  const { showWarning } = useToast();
 
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectionNote, setRejectionNote] = useState('');
@@ -14,13 +17,28 @@ const ApprovalQueue = () => {
   const getAccountName = (id) => accounts.find(a => a.id === id)?.name || id;
   const getPartyName = (id) => parties.find(p => p.id === id)?.name || '';
 
-  const handleApprove = (id) => {
-    approveTransaction(id);
+  const isSelfCreated = (txn) => {
+    return txn.createdBy === currentUser.name || txn.createdById === currentUser.id;
   };
 
-  const handleReject = (id) => {
-    if (!rejectionNote.trim()) return alert('Please enter a rejection reason.');
-    rejectTransaction(id, rejectionNote.trim());
+  const handleApprove = (txn) => {
+    if (isSelfCreated(txn)) {
+      showWarning('You cannot approve your own transaction. Another authorized user must review it.');
+      return;
+    }
+    approveTransaction(txn.id);
+  };
+
+  const handleReject = (txn) => {
+    if (!rejectionNote.trim()) {
+      showWarning('Please enter a rejection reason.');
+      return;
+    }
+    if (isSelfCreated(txn)) {
+      showWarning('You cannot reject your own transaction. Another authorized user must review it.');
+      return;
+    }
+    rejectTransaction(txn.id, rejectionNote.trim());
     setRejectingId(null);
     setRejectionNote('');
   };
@@ -38,14 +56,25 @@ const ApprovalQueue = () => {
 
       {!isChecker && (
         <div className="glass-panel approval-notice">
-          <p>🔒 You need <strong>Admin</strong> or <strong>Checker</strong> role to approve or reject transactions.</p>
+          <p>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{verticalAlign: 'middle', marginRight: '6px'}}>
+              <rect x="1" y="4" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M4 4V3a4 4 0 018 0v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            You need <strong>Admin</strong> or <strong>Checker</strong> role to approve or reject transactions.
+          </p>
           <p className="text-secondary">Current role: {currentUser.role}</p>
         </div>
       )}
 
       {pendingTransactions.length === 0 ? (
         <div className="glass-panel text-center approval-empty">
-          <p className="approval-empty-icon">✅</p>
+          <p className="approval-empty-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="22" stroke="var(--accent)" strokeWidth="2"/>
+              <path d="M15 25l6 6 12-12" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </p>
           <p>No pending approvals.</p>
           <p className="text-secondary">All transactions have been reviewed.</p>
         </div>
@@ -55,6 +84,7 @@ const ApprovalQueue = () => {
             const debitEntry = txn.entries?.find(e => e.debit > 0);
             const creditEntry = txn.entries?.find(e => e.credit > 0);
             const amount = debitEntry?.debit || creditEntry?.credit || 0;
+            const selfCreated = isSelfCreated(txn);
 
             return (
               <div key={txn.id} className="approval-card glass-panel">
@@ -77,6 +107,17 @@ const ApprovalQueue = () => {
                   <span className="acc-tag credit-tag">{creditEntry ? getAccountName(creditEntry.accountId) : '-'}</span>
                   {txn.partyId && <span className="approval-party">• {getPartyName(txn.partyId)}</span>}
                 </div>
+
+                {/* Self-approval warning */}
+                {isChecker && selfCreated && (
+                  <div className="self-approval-notice">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{verticalAlign: 'middle', marginRight: '4px'}}>
+                      <path d="M7 1l6.06 10.5H.94L7 1z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                      <path d="M7 5.5v2.5M7 10v.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                    You created this transaction — another user must review it.
+                  </div>
+                )}
 
                 {/* Rejection note input */}
                 {rejectingId === txn.id && (
@@ -101,18 +142,28 @@ const ApprovalQueue = () => {
                         </button>
                         <button
                           className="primary-btn reject-btn"
-                          onClick={() => handleReject(txn.id)}
-                          disabled={!rejectionNote.trim()}
+                          onClick={() => handleReject(txn)}
+                          disabled={!rejectionNote.trim() || isLoading}
                         >
-                          Confirm Reject
+                          {isLoading ? 'Rejecting...' : 'Confirm Reject'}
                         </button>
                       </>
                     ) : (
                       <>
-                        <button className="primary-btn approve-btn" onClick={() => handleApprove(txn.id)}>
-                          ✓ Approve
+                        <button 
+                          className="primary-btn approve-btn" 
+                          onClick={() => handleApprove(txn)}
+                          disabled={selfCreated || isLoading}
+                          title={selfCreated ? 'You cannot approve your own transaction' : 'Approve this transaction'}
+                        >
+                          {isLoading ? 'Processing...' : '✓ Approve'}
                         </button>
-                        <button className="action-btn reject-trigger-btn" onClick={() => setRejectingId(txn.id)}>
+                        <button 
+                          className="action-btn reject-trigger-btn" 
+                          onClick={() => setRejectingId(txn.id)}
+                          disabled={selfCreated || isLoading}
+                          title={selfCreated ? 'You cannot reject your own transaction' : 'Reject this transaction'}
+                        >
                           ✗ Reject
                         </button>
                       </>

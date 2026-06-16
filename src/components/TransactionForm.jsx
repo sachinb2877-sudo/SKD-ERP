@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useERP } from '../hooks/useERP.js';
-import { getNextVoucherNo } from '../context/ERPContext.jsx';
+import { useToast } from '../context/ToastContext.jsx';
 
 const TransactionForm = () => {
-  const { accounts, parties, categories, addTransaction, addCategory, currentUser, transactions } = useERP();
+  const { accounts, parties, categories, addTransaction, addCategory, currentUser, isLoading } = useERP();
+  const { showWarning } = useToast();
 
   // Form state
-  const [txnType, setTxnType] = useState('PAYMENT'); // RECEIPT, PAYMENT, JOURNAL, CONTRA
+  const [txnType, setTxnType] = useState('PAYMENT'); // RECEIPT, PAYMENT, JOURNAL
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
@@ -14,154 +15,116 @@ const TransactionForm = () => {
   const [partyId, setPartyId] = useState('');
   const [debitAccountId, setDebitAccountId] = useState('');
   const [creditAccountId, setCreditAccountId] = useState('');
-  const [paymentMode, setPaymentMode] = useState('CASH');
-  const [refNo, setRefNo] = useState('');
 
   // New category inline
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showNewCat, setShowNewCat] = useState(false);
 
-  // Resolve accounts dynamically based on txn type, payment mode, and category
-  useEffect(() => {
-    let dr = '';
-    let cr = '';
+  // Filter accounts by group for the dropdowns
+  const assetAccounts = accounts.filter(a => a.type === 'ASSET');
+  const allAccounts = accounts;
 
-    if (txnType === 'RECEIPT') {
-      dr = paymentMode === 'CASH' ? 'acc_cash' : 'acc_bank';
-      if (category === 'Product Sales' || category === 'Product Sales Revenue') {
-        cr = 'acc_prod_sales';
-      } else if (category === 'Other Income') {
-        cr = 'acc_other_inc';
-      } else if (category === 'Milk Sales' || category === 'Milk Sales Revenue') {
-        cr = 'acc_milk_sales';
-      } else {
-        // Dynamic lookup: look for an expense/revenue account matching category name
-        const matchedAcc = accounts.find(a => a.name.toLowerCase() === category.toLowerCase() && a.type === 'REVENUE');
-        if (matchedAcc) {
-          cr = matchedAcc.id;
-        } else {
-          cr = 'acc_milk_sales'; // default milk sales
-        }
-      }
-    } else if (txnType === 'PAYMENT') {
-      cr = paymentMode === 'CASH' ? 'acc_cash' : 'acc_bank';
-      switch (category) {
-        case 'Milk Purchase':
-          dr = 'acc_milk_purchase';
-          break;
-        case 'Salary':
-          dr = 'acc_salaries';
-          break;
-        case 'Fuel':
-          dr = 'acc_fuel';
-          break;
-        case 'Transport':
-          dr = 'acc_transport';
-          break;
-        case 'Electricity':
-          dr = 'acc_electricity';
-          break;
-        case 'Maintenance':
-          dr = 'acc_maintenance';
-          break;
-        case 'Office Expenses':
-          dr = 'acc_office';
-          break;
-        case 'Feed Purchase':
-          dr = 'acc_feed_purchase';
-          break;
-        case 'Equipment Purchase':
-          dr = 'acc_equip_asset';
-          break;
-        default: {
-          const matchedAcc = accounts.find(a => a.name.toLowerCase() === category.toLowerCase() && a.type === 'EXPENSE');
-          if (matchedAcc) {
-            dr = matchedAcc.id;
-          } else {
-            dr = 'acc_other_exp';
-          }
-        }
-      }
-    } else if (txnType === 'CONTRA') {
-      if (paymentMode === 'CASH') {
-        dr = 'acc_cash';
-        cr = 'acc_bank';
-      } else {
-        dr = 'acc_bank';
-        cr = 'acc_cash';
-      }
-    } else if (txnType === 'JOURNAL') {
-      dr = 'acc_other_exp';
-      cr = 'acc_other_inc';
-    }
-
-    setDebitAccountId(dr);
-    setCreditAccountId(cr);
-  }, [txnType, paymentMode, category, accounts]);
+  // Parties: for RECEIPT show customers, for PAYMENT show vendors
+  const relevantParties = parties.filter(p =>
+    txnType === 'RECEIPT' ? p.type === 'CUSTOMER' : p.type === 'VENDOR'
+  );
 
   // Smart defaults when txnType changes
   const handleTypeChange = (type) => {
     setTxnType(type);
-    setPaymentMode('CASH');
-    setCategory('');
     setPartyId('');
-    setRefNo('');
+
+    if (type === 'RECEIPT') {
+      setDebitAccountId('acc_bank');
+      setCreditAccountId('acc_income');
+    } else if (type === 'PAYMENT') {
+      setDebitAccountId('acc_expense');
+      setCreditAccountId('acc_bank');
+    } else {
+      setDebitAccountId('');
+      setCreditAccountId('');
+    }
   };
 
-  const handleSubmit = (e) => {
+  // When a party is selected, auto-set the AR/AP account
+  const handlePartyChange = (pid) => {
+    setPartyId(pid);
+    if (!pid) {
+      if (txnType === 'RECEIPT') {
+        setCreditAccountId('acc_income');
+      } else if (txnType === 'PAYMENT') {
+        setDebitAccountId('acc_expense');
+      }
+      return;
+    }
+
+    const party = parties.find(p => p.id === pid);
+    if (!party) return;
+
+    if (txnType === 'RECEIPT') {
+      if (party.receivableAccountId) {
+        setCreditAccountId(party.receivableAccountId);
+      }
+    } else if (txnType === 'PAYMENT') {
+      if (party.payableAccountId) {
+        setDebitAccountId(party.payableAccountId);
+      }
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
-      return alert('Please enter a valid amount.');
+      showWarning('Please enter a valid amount.');
+      return;
     }
     if (!remarks.trim()) {
-      return alert('Remarks is mandatory. Please describe this transaction.');
+      showWarning('Remarks is mandatory. Please describe this transaction.');
+      return;
     }
     if (!debitAccountId || !creditAccountId) {
-      return alert('Please select both Debit and Credit accounts.');
+      showWarning('Please select both Debit and Credit accounts.');
+      return;
     }
     if (debitAccountId === creditAccountId) {
-      return alert('Debit and Credit accounts must be different.');
+      showWarning('Debit and Credit accounts must be different.');
+      return;
     }
 
     const parsedAmount = parseFloat(amount);
 
     const txn = {
-      id: 'txn_' + Date.now().toString(),
       date,
       remarks: remarks.trim(),
-      type: txnType,
-      paymentMode: txnType === 'JOURNAL' ? 'JOURNAL' : paymentMode,
-      refNo: txnType === 'JOURNAL' ? '' : refNo.trim(),
       entries: [
         { accountId: debitAccountId, debit: parsedAmount, credit: 0 },
         { accountId: creditAccountId, debit: 0, credit: parsedAmount },
       ],
-      partyId: (txnType === 'RECEIPT' || txnType === 'PAYMENT') ? (partyId || null) : null,
-      category: category || (txnType === 'RECEIPT' ? 'Milk Sales' : txnType === 'PAYMENT' ? 'Milk Purchase' : 'Miscellaneous'),
-      createdAt: new Date().toISOString(),
+      partyId: partyId || null,
+      category: category || (txnType === 'RECEIPT' ? 'Salary' : 'Expense'),
     };
 
-    addTransaction(txn);
+    await addTransaction(txn);
 
     // Reset form
     setAmount('');
     setRemarks('');
     setPartyId('');
     setCategory('');
-    setRefNo('');
-    handleTypeChange(txnType); // Re-set smart defaults
+    handleTypeChange(txnType);
   };
 
   const handleAddCategory = () => {
     if (newCategoryName.trim()) {
-      const type = txnType === 'RECEIPT' ? 'REVENUE' : 'EXPENSE';
-      addCategory(newCategoryName.trim(), type);
+      addCategory(newCategoryName.trim());
       setCategory(newCategoryName.trim());
       setNewCategoryName('');
       setShowNewCat(false);
     }
   };
+
+  const getAccountName = (id) => accounts.find(a => a.id === id)?.name || id;
 
   return (
     <form className="transaction-form glass-panel" onSubmit={handleSubmit}>
@@ -170,30 +133,18 @@ const TransactionForm = () => {
       {/* Transaction Type */}
       <div className="form-group">
         <label>Transaction Type</label>
-        <div className="txn-type-toggle" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
-          {['RECEIPT', 'PAYMENT', 'JOURNAL', 'CONTRA'].map(t => (
+        <div className="txn-type-toggle">
+          {['RECEIPT', 'PAYMENT', 'JOURNAL'].map(t => (
             <button
               key={t}
               type="button"
-              className={`toggle-btn ${txnType === t ? 'active' : ''} ${t === 'RECEIPT' ? 'receipt' : t === 'PAYMENT' ? 'payment' : t === 'JOURNAL' ? 'journal' : 'contra'}`}
+              className={`toggle-btn ${txnType === t ? 'active' : ''} ${t === 'RECEIPT' ? 'receipt' : t === 'PAYMENT' ? 'payment' : 'journal'}`}
               onClick={() => handleTypeChange(t)}
-              style={{ fontSize: '0.85rem', padding: '6px 2px' }}
             >
-              {t === 'RECEIPT' ? '↓ Receipt' : t === 'PAYMENT' ? '↑ Payment' : t === 'JOURNAL' ? '⇄ Journal' : '⇅ Contra'}
+              {t === 'RECEIPT' ? '↓ Receipt' : t === 'PAYMENT' ? '↑ Payment' : '⇄ Journal'}
             </button>
           ))}
         </div>
-      </div>
-
-      {/* Voucher Number Preview */}
-      <div className="form-group">
-        <label>Next Voucher Number</label>
-        <input
-          type="text"
-          value={getNextVoucherNo(transactions, txnType, date)}
-          disabled
-          style={{ background: 'rgba(255, 255, 255, 0.08)', fontStyle: 'italic', fontWeight: 'bold', border: '1px dashed rgba(255, 255, 255, 0.2)' }}
-        />
       </div>
 
       {/* Amount */}
@@ -210,6 +161,17 @@ const TransactionForm = () => {
         />
       </div>
 
+      {/* Date */}
+      <div className="form-group">
+        <label>Date</label>
+        <input
+          type="date"
+          value={date}
+          onChange={e => setDate(e.target.value)}
+          required
+        />
+      </div>
+
       {/* Remarks (mandatory) */}
       <div className="form-group">
         <label>Remarks <span className="required-star">*</span></label>
@@ -217,23 +179,67 @@ const TransactionForm = () => {
           type="text"
           value={remarks}
           onChange={e => setRemarks(e.target.value)}
-          placeholder="e.g. Daily office expense"
+          placeholder="e.g. Office rent for April"
           required
         />
       </div>
 
-      {/* Payment Mode (Only for Receipts, Payments, and Contra) */}
-      {txnType !== 'JOURNAL' && (
+      {/* Party (optional, contextual) */}
+      {txnType !== 'JOURNAL' && relevantParties.length > 0 && (
         <div className="form-group">
-          <label>Payment Mode</label>
-          <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)}>
-            <option value="CASH">Cash</option>
-            <option value="BANK TRANSFER">Bank Transfer</option>
-            <option value="UPI">UPI</option>
-            <option value="CHEQUE">Cheque</option>
-            <option value="NEFT/RTGS">NEFT/RTGS</option>
+          <label>{txnType === 'RECEIPT' ? 'Received From (Customer)' : 'Paid To (Vendor)'}</label>
+          <select value={partyId} onChange={e => handlePartyChange(e.target.value)}>
+            <option value="">— No Party (Direct) —</option>
+            {relevantParties.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
           </select>
         </div>
+      )}
+
+      {/* Payment Mode / Account selection for Receipt and Payment, full inputs for Journal */}
+      {txnType !== 'JOURNAL' ? (
+        <div className="form-group">
+          <label>Payment Mode / Account</label>
+          <select
+            value={txnType === 'RECEIPT' ? debitAccountId : creditAccountId}
+            onChange={e => {
+              if (txnType === 'RECEIPT') {
+                setDebitAccountId(e.target.value);
+              } else {
+                setCreditAccountId(e.target.value);
+              }
+            }}
+            required
+          >
+            <option value="acc_bank">Bank Account</option>
+            <option value="acc_cash">Cash</option>
+          </select>
+        </div>
+      ) : (
+        <>
+          {/* Debit Account */}
+          <div className="form-group">
+            <label>Debit Account <span className="acc-hint">(money goes into)</span></label>
+            <select value={debitAccountId} onChange={e => setDebitAccountId(e.target.value)} required>
+              <option value="" disabled>Select Account</option>
+              {allAccounts.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Credit Account */}
+          <div className="form-group">
+            <label>Credit Account <span className="acc-hint">(money comes from)</span></label>
+            <select value={creditAccountId} onChange={e => setCreditAccountId(e.target.value)} required>
+              <option value="" disabled>Select Account</option>
+              {allAccounts.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        </>
       )}
 
       {/* Category */}
@@ -267,14 +273,35 @@ const TransactionForm = () => {
         )}
       </div>
 
-      {currentUser.role === 'MAKER' && (
-        <div className="maker-notice">
-          <span>📋</span> Transactions will be submitted for approval
+      {/* Preview */}
+      {debitAccountId && creditAccountId && amount && (
+        <div className="entry-preview glass-panel">
+          <p className="preview-title">Entry Preview</p>
+          <div className="preview-row">
+            <span className="preview-dr">Dr.</span>
+            <span>{getAccountName(debitAccountId)}</span>
+            <span className="preview-amt">₹{parseFloat(amount || 0).toLocaleString()}</span>
+          </div>
+          <div className="preview-row">
+            <span className="preview-cr">Cr.</span>
+            <span>{getAccountName(creditAccountId)}</span>
+            <span className="preview-amt">₹{parseFloat(amount || 0).toLocaleString()}</span>
+          </div>
         </div>
       )}
 
-      <button type="submit" className="primary-btn">
-        {currentUser.role === 'MAKER' ? 'Submit for Approval' : 'Add Transaction'}
+      {currentUser.role === 'MAKER' && (
+        <div className="maker-notice">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{verticalAlign: 'middle', marginRight: '4px'}}>
+            <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M5 7h6M5 9.5h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          Transactions will be submitted for approval
+        </div>
+      )}
+
+      <button type="submit" className="primary-btn" disabled={isLoading}>
+        {isLoading ? 'Submitting...' : (currentUser.role === 'MAKER' ? 'Submit for Approval' : 'Add Transaction')}
       </button>
     </form>
   );

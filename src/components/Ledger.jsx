@@ -91,7 +91,6 @@ const Ledger = () => {
                 <tr>
                   <th>Date</th>
                   <th>Remarks</th>
-                  <th>Category</th>
                   <th>Party</th>
                   <th className="text-right">Debit (₹)</th>
                   <th className="text-right">Credit (₹)</th>
@@ -103,18 +102,6 @@ const Ledger = () => {
                   <tr key={`${entry.txnId}-${idx}`}>
                     <td>{new Date(entry.date).toLocaleDateString()}</td>
                     <td className="remarks-cell">{entry.remarks}</td>
-                    <td>
-                      <span className="category-badge" style={{
-                        fontSize: '0.8rem',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        background: 'rgba(255,255,255,0.06)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {entry.category || 'General'}
-                      </span>
-                    </td>
                     <td>{entry.partyId ? getPartyName(entry.partyId) : '-'}</td>
                     <td className="text-right">{entry.debit > 0 ? entry.debit.toLocaleString() : '-'}</td>
                     <td className="text-right">{entry.credit > 0 ? entry.credit.toLocaleString() : '-'}</td>
@@ -126,7 +113,7 @@ const Ledger = () => {
               </tbody>
               <tfoot>
                 <tr className="ledger-totals-row">
-                  <td colSpan="4"><strong>Totals</strong></td>
+                  <td colSpan="3"><strong>Totals</strong></td>
                   <td className="text-right"><strong>{totalDebit.toLocaleString()}</strong></td>
                   <td className="text-right"><strong>{totalCredit.toLocaleString()}</strong></td>
                   <td className={`text-right font-semibold ${(totalDebit - totalCredit) >= 0 ? 'positive' : 'negative'}`}>

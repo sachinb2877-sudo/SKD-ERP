@@ -1,14 +1,19 @@
 import React, { useState } from 'react';
 import { useERP } from '../hooks/useERP.js';
-import { ROLE_OPTIONS, ROLE_COLORS } from '../constants/defaults.js';
+import { useToast } from '../context/ToastContext.jsx';
+import { ROLE_OPTIONS, ROLE_COLORS, PERMISSION_LABELS } from '../constants/defaults.js';
+import DeleteConfirmModal from './DeleteConfirmModal.jsx';
 
 const UserManager = () => {
-  const { users, addUser, editUser, deleteUser, currentUser, resetDatabase } = useERP();
+  const { users, addUser, editUser, deleteUser, updateUserPermissions, currentUser, isLoading } = useERP();
+  const { showWarning, showInfo } = useToast();
 
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [formData, setFormData] = useState({ id: '', password: '', name: '', role: 'VIEWER' });
-  const [showPasswords, setShowPasswords] = useState({});
+  const [permissionsUser, setPermissionsUser] = useState(null);
+  const [permissionsData, setPermissionsData] = useState(null);
+  const [deletingUser, setDeletingUser] = useState(null);
 
   const isAdmin = currentUser?.role === 'ADMIN';
 
@@ -21,21 +26,29 @@ const UserManager = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    if (!formData.name.trim()) return alert('Name is required.');
+    if (!formData.name.trim()) {
+      showWarning('Name is required.');
+      return;
+    }
 
     if (editId) {
-      // Edit: update only changed fields
       const updates = { name: formData.name.trim(), role: formData.role };
       if (formData.password.trim()) {
         updates.password = formData.password.trim();
       }
       editUser(editId, updates);
     } else {
-      // Add: all fields required
-      if (!formData.id.trim()) return alert('User ID is required.');
-      if (!formData.password.trim()) return alert('Password is required.');
+      if (!formData.id.trim()) {
+        showWarning('User ID is required.');
+        return;
+      }
+      if (!formData.password.trim()) {
+        showWarning('Password is required.');
+        return;
+      }
       if (users.find(u => u.id === formData.id.trim().toLowerCase())) {
-        return alert('A user with this ID already exists.');
+        showWarning('A user with this ID already exists.');
+        return;
       }
       addUser({
         id: formData.id.trim().toLowerCase(),
@@ -59,34 +72,46 @@ const UserManager = () => {
   };
 
   const handleDelete = (user) => {
-    if (user.id === 'admin') return alert('The Admin account cannot be deleted.');
-    if (user.id === currentUser?.id) return alert('You cannot delete your own account.');
-    if (confirm(`Delete user "${user.name}" (${user.id})? This action cannot be undone.`)) {
-      deleteUser(user.id);
+    if (user.id === 'admin') {
+      showWarning('The Admin account cannot be deleted.');
+      return;
+    }
+    if (user.id === currentUser?.id) {
+      showWarning('You cannot delete your own account.');
+      return;
+    }
+    setDeletingUser(user);
+  };
+
+  const confirmDelete = () => {
+    if (deletingUser) {
+      deleteUser(deletingUser.id);
+      setDeletingUser(null);
     }
   };
 
-  const togglePassword = (userId) => {
-    setShowPasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
+  const handlePermissionsClick = (user) => {
+    setPermissionsUser(user);
+    setPermissionsData(JSON.parse(JSON.stringify(user.permissions || { pages: {}, actions: {} })));
   };
 
-  const handleResetDatabase = () => {
-    const confirmFirst = confirm("Are you sure you want to delete all transaction history, party registries, and custom ledger accounts?\n\nThis will reset the database back to factory settings. This action cannot be undone.");
-    if (!confirmFirst) return;
-
-    const typedConfirm = prompt("To confirm the deletion of all data, please type 'RESET' in the box below:");
-    if (typedConfirm === 'RESET') {
-      resetDatabase();
-      alert("Database has been successfully reset. All transaction records and parties cleared.");
-    } else if (typedConfirm !== null) {
-      alert("Confirmation mismatch. Reset aborted.");
-    }
+  const handlePermissionsSave = async (e) => {
+    e.preventDefault();
+    await updateUserPermissions(permissionsUser.id, permissionsData);
+    setPermissionsUser(null);
+    setPermissionsData(null);
   };
 
   if (!isAdmin) {
     return (
       <div className="glass-panel text-center" style={{ padding: '3rem 2rem' }}>
-        <p style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🔒</p>
+        <p style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <rect x="8" y="20" width="32" height="22" rx="4" stroke="currentColor" strokeWidth="2.5"/>
+            <path d="M16 20V14a8 8 0 0116 0v6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+            <circle cx="24" cy="32" r="3" fill="currentColor"/>
+          </svg>
+        </p>
         <p>Only Admin users can manage accounts.</p>
         <p className="text-secondary">Current role: {currentUser?.role}</p>
       </div>
@@ -133,11 +158,12 @@ const UserManager = () => {
             <div className="form-group">
               <label>{editId ? 'New Password (leave blank to keep)' : 'Password'} {!editId && <span className="required-star">*</span>}</label>
               <input
-                type="text"
+                type="password"
                 value={formData.password}
                 onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
                 placeholder={editId ? 'Leave blank to keep current' : 'Enter password'}
                 required={!editId}
+                autoComplete="new-password"
               />
             </div>
             <div className="form-group">
@@ -158,8 +184,82 @@ const UserManager = () => {
               )}
             </div>
           </div>
-          <button type="submit" className="primary-btn">{editId ? 'Update User' : 'Create User'}</button>
+          <button type="submit" className="primary-btn" disabled={isLoading}>
+            {isLoading ? 'Saving...' : (editId ? 'Update User' : 'Create User')}
+          </button>
         </form>
+      )}
+
+      {/* Permissions Modal */}
+      {permissionsUser && permissionsData && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-panel" style={{ maxWidth: '600px', width: '100%' }}>
+            <h2>Permissions: {permissionsUser.name}</h2>
+            <form onSubmit={handlePermissionsSave}>
+              <div className="permissions-grid">
+                <div className="permissions-section">
+                  <h4>Pages View Access</h4>
+                  {Object.entries(PERMISSION_LABELS.pages).map(([key, label]) => (
+                    <label key={key} className="permission-toggle">
+                      <input 
+                        type="checkbox" 
+                        checked={!!permissionsData.pages[key]}
+                        onChange={e => setPermissionsData({
+                          ...permissionsData,
+                          pages: { ...permissionsData.pages, [key]: e.target.checked }
+                        })}
+                      />
+                      <span className="toggle-slider"></span>
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="permissions-section">
+                  <h4>Action Abilities</h4>
+                  {Object.entries(PERMISSION_LABELS.actions).map(([key, label]) => (
+                    <label key={key} className="permission-toggle">
+                      <input 
+                        type="checkbox" 
+                        checked={!!permissionsData.actions[key]}
+                        onChange={e => setPermissionsData({
+                          ...permissionsData,
+                          actions: { ...permissionsData.actions, [key]: e.target.checked }
+                        })}
+                      />
+                      <span className="toggle-slider"></span>
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
+                <button type="button" className="action-btn" onClick={() => setPermissionsUser(null)}>Cancel</button>
+                <button type="submit" className="primary-btn" disabled={isLoading}>
+                  {isLoading ? 'Saving...' : 'Save Permissions'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingUser && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-panel" style={{ maxWidth: '440px' }}>
+            <h2>Delete User</h2>
+            <p>
+              Are you sure you want to delete user <strong>"{deletingUser.name}"</strong> ({deletingUser.id})?
+            </p>
+            <p className="text-secondary" style={{ fontSize: '0.85rem' }}>This action cannot be undone.</p>
+            <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
+              <button className="action-btn" onClick={() => setDeletingUser(null)}>Cancel</button>
+              <button className="primary-btn delete" onClick={confirmDelete} disabled={isLoading}>
+                {isLoading ? 'Deleting...' : 'Delete User'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Users Table */}
@@ -169,8 +269,8 @@ const UserManager = () => {
             <tr>
               <th>User ID</th>
               <th>Name</th>
-              <th>Password</th>
               <th>Role</th>
+              <th>Created</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -182,28 +282,19 @@ const UserManager = () => {
                 </td>
                 <td>{user.name}</td>
                 <td>
-                  <div className="password-cell">
-                    <span className="password-text">
-                      {showPasswords[user.id] ? user.password : '••••••••'}
-                    </span>
-                    <button
-                      type="button"
-                      className="password-peek-btn"
-                      onClick={() => togglePassword(user.id)}
-                      title={showPasswords[user.id] ? 'Hide' : 'Show'}
-                    >
-                      {showPasswords[user.id] ? '🙈' : '👁️'}
-                    </button>
-                  </div>
-                </td>
-                <td>
                   <span className={`role-badge ${ROLE_COLORS[user.role]}`}>
                     {user.role}
                   </span>
                 </td>
+                <td className="text-secondary" style={{ fontSize: '0.85rem' }}>
+                  {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
+                </td>
                 <td>
                   <div className="user-actions">
                     <button className="action-btn" onClick={() => handleEdit(user)}>Edit</button>
+                    {user.id !== 'admin' && (
+                      <button className="action-btn" onClick={() => handlePermissionsClick(user)}>Permissions</button>
+                    )}
                     {user.id !== 'admin' && user.id !== currentUser?.id && (
                       <button className="action-btn delete" onClick={() => handleDelete(user)}>Delete</button>
                     )}
@@ -216,32 +307,6 @@ const UserManager = () => {
             ))}
           </tbody>
         </table>
-      </div>
-
-      {/* Danger Zone: Database Reset */}
-      <div className="glass-panel" style={{ marginTop: '2rem', border: '1px solid rgba(239, 68, 68, 0.25)', padding: '1.5rem 2rem' }}>
-        <h4 style={{ color: '#f87171', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>⚠️</span> Danger Zone: System Maintenance
-        </h4>
-        <p className="text-secondary" style={{ fontSize: '0.85rem', margin: '0 0 1.25rem 0', lineHeight: '1.5', color: '#cbd5e1' }}>
-          Resetting the database will permanently delete all transaction history, journal entries, milk sales registries, outstanding balances (AR/AP), customer & vendor party accounts, and previous system audit logs.
-          <strong> User accounts and your current login session will be preserved.</strong> This operation is destructive and cannot be undone.
-        </p>
-        <button 
-          onClick={handleResetDatabase} 
-          className="action-btn delete" 
-          style={{ 
-            background: 'rgba(239, 68, 68, 0.1)', 
-            borderColor: 'rgba(239, 68, 68, 0.3)', 
-            color: '#f87171', 
-            fontWeight: '600', 
-            padding: '0.6rem 1.25rem',
-            cursor: 'pointer',
-            borderRadius: '6px'
-          }}
-        >
-          🗑️ Reset Database to Factory Defaults
-        </button>
       </div>
     </div>
   );

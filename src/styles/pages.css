@@ -145,8 +145,20 @@
 .user-actions { display: flex; gap: 0.5rem; align-items: center; }
 .you-badge { font-size: 0.7rem; color: var(--accent); font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; background: rgba(59, 130, 246, 0.1); }
 
+/* ── Permissions Panel ────────────────────────────────────── */
+.permissions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1rem; }
+.permissions-section h4 { margin-top: 0; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--panel-border); color: var(--text-primary); }
+.permission-toggle { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; cursor: pointer; user-select: none; font-size: 0.9rem; color: var(--text-secondary); }
+.permission-toggle input { display: none; }
+.toggle-slider { width: 36px; height: 20px; background: rgba(255,255,255,0.1); border-radius: 20px; position: relative; transition: background 0.3s; flex-shrink: 0; }
+.toggle-slider::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: white; border-radius: 50%; transition: transform 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+.permission-toggle input:checked + .toggle-slider { background: var(--accent); }
+.permission-toggle input:checked + .toggle-slider::after { transform: translateX(16px); }
+.permission-toggle:hover { color: var(--text-primary); }
+
 /* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 900px) {
   .ledger-filters { flex-direction: column; }
   .user-form-grid { grid-template-columns: 1fr; }
+  .permissions-grid { grid-template-columns: 1fr; gap: 1.5rem; }
 }

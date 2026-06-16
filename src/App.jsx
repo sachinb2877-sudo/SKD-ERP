@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useERP } from './hooks/useERP.js'
+import { useToast } from './context/ToastContext.jsx'
 import { ROLE_LABELS } from './constants/defaults.js'
 import { generatePnLReport, generateBalanceSheetReport, generatePartyLedgerReport, generateCategoryReport } from './reports/generateAuditReport.js'
 import Sidebar from './components/Sidebar.jsx'
@@ -33,7 +34,17 @@ function App() {
     currentUser,
     isAuthenticated,
     logout,
+    setToastFns,
+    txnPagination,
+    loadTransactionPage,
+    isLoading,
   } = useERP();
+
+  // Inject toast functions into ERPContext
+  const toastFns = useToast();
+  useEffect(() => {
+    setToastFns(toastFns);
+  }, [toastFns, setToastFns]);
 
   const [activeTab, setActiveTab] = useState('OVERVIEW');
 
@@ -86,13 +97,17 @@ function App() {
       if (reportToDate) bsTxns = bsTxns.filter(t => t.date <= reportToDate);
       generateBalanceSheetReport(bsTxns, accounts, period);
     } else if (reportType === 'PARTY_LEDGER') {
-      if (!reportPartyId) return alert('Please select a party for the ledger report.');
+      if (!reportPartyId) {
+        toastFns.showWarning('Please select a party for the ledger report.');
+        return;
+      }
       const party = parties.find(p => p.id === reportPartyId);
       generatePartyLedgerReport(reportTxns, party, accounts, period);
     } else if (reportType === 'CATEGORY_WISE') {
       generateCategoryReport(reportTxns, period);
     }
     setIsModalOpen(false);
+    toastFns.showSuccess('Report downloaded successfully');
   };
 
   // ── Tab title mapping ───────────────────────────────────────
@@ -148,9 +163,11 @@ function App() {
                 ))}
               </select>
             </div>
-            <button className="primary-btn download-btn" onClick={() => setIsModalOpen(true)}>
-              Download PDF Report
-            </button>
+            {currentUser?.permissions?.actions?.downloadReports && (
+              <button className="primary-btn download-btn" onClick={() => setIsModalOpen(true)}>
+                Download PDF Report
+              </button>
+            )}
           </div>
         </header>
 
@@ -176,12 +193,12 @@ function App() {
 
           {activeTab === 'TRANSACTIONS' && (
             <div className="fade-in transaction-layout">
-              {currentUser.role !== 'VIEWER' && (
+              {currentUser?.permissions?.actions?.createTransactions && (
                 <aside className="transaction-form-sidebar">
                   <TransactionForm />
                 </aside>
               )}
-              <section className={`transaction-list-section ${currentUser.role === 'VIEWER' ? 'full-width' : ''}`}>
+              <section className={`transaction-list-section ${!currentUser?.permissions?.actions?.createTransactions ? 'full-width' : ''}`}>
                 <div className="filters glass-panel">
                   <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
                     <option value="ALL">All Months</option>
@@ -191,6 +208,9 @@ function App() {
                 <TransactionList
                   transactions={tabFilteredTxns}
                   onDelete={deleteTransaction}
+                  pagination={txnPagination}
+                  onPageChange={loadTransactionPage}
+                  isLoading={isLoading}
                 />
               </section>
             </div>
